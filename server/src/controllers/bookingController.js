@@ -5,6 +5,9 @@ import { generateZoomLink } from "../utils/generateZoomLink.js";
 import { createZoomMeeting, deleteZoomMeeting } from "../utils/zoom.js";
 import { generateICS } from "../utils/generateICS.js";
 
+/**
+ * Book a new session
+ */
 export const bookSession = async (req, res) => {
   const { mentorId, startTime, topic } = req.body;
   const menteeId = req.user.id;
@@ -48,9 +51,9 @@ export const bookSession = async (req, res) => {
 
     if (isNaN(start.getTime())) {
       console.error("❌ Invalid date format");
-      return res
-        .status(400)
-        .json({ message: "Invalid date format for startTime" });
+      return res.status(400).json({
+        message: "Invalid date format for startTime",
+      });
     }
 
     // Check conflict
@@ -71,9 +74,9 @@ export const bookSession = async (req, res) => {
 
     if (conflict) {
       console.error("❌ Time slot conflict");
-      return res
-        .status(400)
-        .json({ message: "Time slot already booked or pending" });
+      return res.status(400).json({
+        message: "Time slot already booked or pending",
+      });
     }
 
     // Create session
@@ -90,22 +93,27 @@ export const bookSession = async (req, res) => {
     console.log("✅ Session created:", session._id);
 
     const populatedSession = await Session.findById(session._id)
-      .populate("mentee", "email profile.fullName")
-      .populate("mentor", "email profile.fullName");
+      .populate("mentee", "email profile.fullName fullName")
+      .populate("mentor", "email profile.fullName fullName");
 
     // Email mentee
     await sendEmail({
       to: populatedSession.mentee.email,
       subject: "Session Request Submitted",
       html: `
-        <h3>Your session request has been submitted!</h3>
-        <p><strong>Mentor:</strong> ${
-          populatedSession.mentor.profile.fullName
-        }</p>
-        <p><strong>Time:</strong> ${start.toLocaleString()}</p>
-        <p><strong>Topic:</strong> ${topic}</p>
-        <p><strong>Status:</strong> Pending mentor approval</p>
-        <p>You will receive the meeting link once the mentor confirms.</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h3 style="color: #7C3AED;">Your session request has been submitted!</h3>
+          <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Mentor:</strong> ${
+              populatedSession.mentor.profile?.fullName ||
+              populatedSession.mentor.fullName
+            }</p>
+            <p style="margin: 5px 0;"><strong>Time:</strong> ${start.toLocaleString()}</p>
+            <p style="margin: 5px 0;"><strong>Topic:</strong> ${topic}</p>
+          </div>
+          <p style="color: #7C3AED;"><strong>Status:</strong> Pending mentor approval</p>
+          <p style="color: #666;">You will receive the meeting link once the mentor confirms.</p>
+        </div>
       `,
     });
 
@@ -114,18 +122,37 @@ export const bookSession = async (req, res) => {
       to: populatedSession.mentor.email,
       subject: "New Session Request - Action Required",
       html: `
-        <h3>You have a new session request!</h3>
-        <p><strong>Mentee:</strong> ${
-          populatedSession.mentee.profile.fullName
-        }</p>
-        <p><strong>Time:</strong> ${start.toLocaleString()}</p>
-        <p><strong>Topic:</strong> ${topic}</p>
-        <p>Please log in to your dashboard to confirm or reject this request.</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h3 style="color: #7C3AED;">You have a new session request!</h3>
+          <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Mentee:</strong> ${
+              populatedSession.mentee.profile?.fullName ||
+              populatedSession.mentee.fullName
+            }</p>
+            <p style="margin: 5px 0;"><strong>Time:</strong> ${start.toLocaleString()}</p>
+            <p style="margin: 5px 0;"><strong>Topic:</strong> ${topic}</p>
+          </div>
+          <p>Please log in to your dashboard to confirm or reject this request.</p>
+        </div>
       `,
     });
 
     console.log("✅ Booking successful!");
-    res.status(201).json(session);
+    res.status(201).json({
+      _id: session._id,
+      id: session._id,
+      mentee: session.mentee,
+      mentor: session.mentor,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      topic: session.topic,
+      status: session.status,
+      zoomLink: null,
+      zoomMeetingId: null,
+      zoomPassword: null,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    });
   } catch (error) {
     console.error("❌ Booking error:", error.message);
     console.error("Stack:", error.stack);
@@ -133,36 +160,56 @@ export const bookSession = async (req, res) => {
   }
 };
 
+/**
+ * Get user sessions (mentee and mentor view)
+ */
 export const getUserSessions = async (req, res) => {
   const userId = req.user.id;
   try {
     const sessions = await Session.find({
       $or: [{ mentee: userId }, { mentor: userId }],
     })
-      .populate("mentee", "profile.fullName email")
-      .populate("mentor", "profile.fullName email")
+      .populate("mentee", "profile.fullName fullName email")
+      .populate("mentor", "profile.fullName fullName email")
       .sort({ startTime: -1 });
 
-    res.json(sessions);
+    // ✅ Ensure all zoom fields are included
+    const sessionsWithZoom = sessions.map((session) => ({
+      ...session.toObject(),
+      _id: session._id,
+      id: session._id,
+      zoomLink: session.zoomLink || null,
+      zoomMeetingId: session.zoomMeetingId || null,
+      zoomPassword: session.zoomPassword || null,
+    }));
+
+    res.json(sessionsWithZoom);
   } catch (error) {
+    console.error("❌ Get user sessions error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
+/**
+ * Complete a session (mark as completed)
+ */
 export const completeSession = async (req, res) => {
   const { sessionId } = req.params;
   try {
-    const session = await Session.findById(sessionId);
+    const session = await Session.findById(sessionId)
+      .populate("mentee", "profile.fullName fullName email")
+      .populate("mentor", "profile.fullName fullName email");
+
     if (!session || session.status !== "confirmed") {
-      return res
-        .status(400)
-        .json({ message: "Invalid session or not confirmed yet" });
+      return res.status(400).json({
+        message: "Invalid session or not confirmed yet",
+      });
     }
 
     const userId = req.user.id;
     if (
-      session.mentee.toString() !== userId &&
-      session.mentor.toString() !== userId
+      session.mentee._id.toString() !== userId &&
+      session.mentor._id.toString() !== userId
     ) {
       return res.status(403).json({ message: "Not authorized" });
     }
@@ -177,21 +224,32 @@ export const completeSession = async (req, res) => {
       );
     }
 
-    res.json({ message: "Session marked as completed" });
+    res.json({
+      message: "Session marked as completed",
+      session: {
+        ...session.toObject(),
+        _id: session._id,
+        id: session._id,
+      },
+    });
   } catch (error) {
+    console.error("❌ Complete session error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Confirm session with REAL Zoom integration
+/**
+ * Confirm session with REAL Zoom integration
+ * ✅ UPDATED: Returns complete session data with zoom link
+ */
 export const confirmSession = async (req, res) => {
   const { sessionId } = req.params;
   const mentorId = req.user.id;
 
   try {
     const session = await Session.findById(sessionId)
-      .populate("mentee", "email profile.fullName")
-      .populate("mentor", "email profile.fullName");
+      .populate("mentee", "email profile.fullName fullName")
+      .populate("mentor", "email profile.fullName fullName");
 
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
@@ -212,7 +270,9 @@ export const confirmSession = async (req, res) => {
         topic: `MentorConnect: ${session.topic}`,
         start_time: session.startTime.toISOString(),
         duration: 60,
-        agenda: `Session with ${session.mentee.profile.fullName}`,
+        agenda: `Session with ${
+          session.mentee.profile?.fullName || session.mentee.fullName
+        }`,
       });
 
       console.log("✅ Real Zoom meeting created:", zoomData.meeting_id);
@@ -237,11 +297,11 @@ export const confirmSession = async (req, res) => {
       subject: "✅ Session Confirmed! - Meeting Link Inside",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #7C3AED;">Great news! Your session has been confirmed!</h2>
+          <h2 style="color: #10B981;">🎉 Great news! Your session has been confirmed!</h2>
           
           <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p style="margin: 5px 0;"><strong>Mentor:</strong> ${
-              session.mentor.profile.fullName
+              session.mentor.profile?.fullName || session.mentor.fullName
             }</p>
             <p style="margin: 5px 0;"><strong>Date & Time:</strong> ${session.startTime.toLocaleString(
               "en-US",
@@ -261,27 +321,38 @@ export const confirmSession = async (req, res) => {
           </div>
 
           <div style="background: #ECFDF5; padding: 20px; border-radius: 8px; border-left: 4px solid #10B981;">
-            <h3 style="margin-top: 0; color: #065F46;">Join Zoom Meeting</h3>
+            <h3 style="margin-top: 0; color: #065F46;">📹 Join Zoom Meeting</h3>
             <a href="${session.zoomLink}" 
-               style="display: inline-block; background: #7C3AED; color: white; padding: 12px 24px; 
+               style="display: inline-block; background: #10B981; color: white; padding: 12px 24px; 
                       text-decoration: none; border-radius: 6px; font-weight: bold; margin: 10px 0;">
               Click to Join Meeting
             </a>
             <p style="margin: 10px 0; font-size: 14px; color: #065F46;">
-              <strong>Meeting ID:</strong> ${session.zoomMeetingId}<br>
-              <strong>Password:</strong> ${session.zoomPassword}
+              <strong>Meeting ID:</strong> <span style="font-family: monospace;">${
+                session.zoomMeetingId
+              }</span><br>
+              <strong>Password:</strong> <span style="font-family: monospace;">${
+                session.zoomPassword
+              }</span>
+            </p>
+            <p style="margin: 10px 0; font-size: 12px; color: #065F46;">
+              💡 The link will be active 15 minutes before the session starts.
             </p>
           </div>
 
           <p style="color: #6B7280; font-size: 14px; margin-top: 20px;">
-            <strong>Tips for a great session:</strong>
+            <strong>✨ Tips for a great session:</strong>
           </p>
           <ul style="color: #6B7280; font-size: 14px;">
-            <li>Join 2-3 minutes early to test your audio/video</li>
-            <li>Find a quiet place with good lighting</li>
-            <li>Prepare any questions you want to discuss</li>
-            <li>Have a notebook ready for taking notes</li>
+            <li>✅ Join 2-3 minutes early to test your audio/video</li>
+            <li>🔇 Find a quiet place with good lighting</li>
+            <li>📝 Prepare any questions you want to discuss</li>
+            <li>📓 Have a notebook ready for taking notes</li>
           </ul>
+          
+          <p style="color: #666; font-size: 12px; margin-top: 20px; text-align: center;">
+            See you soon! 👋
+          </p>
         </div>
       `,
       attachments: icsContent
@@ -295,9 +366,9 @@ export const confirmSession = async (req, res) => {
       subject: "✅ Session Confirmed",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #7C3AED;">Session Confirmed</h2>
+          <h2 style="color: #10B981;">✅ Session Confirmed</h2>
           <p>You have confirmed the session with <strong>${
-            session.mentee.profile.fullName
+            session.mentee.profile?.fullName || session.mentee.fullName
           }</strong></p>
           
           <div style="background: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -308,25 +379,50 @@ export const confirmSession = async (req, res) => {
           </div>
 
           <a href="${session.zoomLink}" 
-             style="display: inline-block; background: #7C3AED; color: white; padding: 12px 24px; 
+             style="display: inline-block; background: #10B981; color: white; padding: 12px 24px; 
                     text-decoration: none; border-radius: 6px; font-weight: bold;">
             Join Zoom Meeting
           </a>
+          
+          <p style="margin: 20px 0; font-size: 12px; color: #666;">
+            <strong>Meeting Details:</strong><br>
+            ID: ${session.zoomMeetingId}<br>
+            Password: ${session.zoomPassword}
+          </p>
         </div>
       `,
     });
 
+    // ✅ IMPORTANT: Return full session object with all fields
+    console.log("✅ Sending confirmed session response");
     res.json({
       message: "Session confirmed successfully",
-      session,
+      session: {
+        _id: session._id,
+        id: session._id,
+        mentee: session.mentee,
+        mentor: session.mentor,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        topic: session.topic,
+        status: session.status,
+        zoomLink: session.zoomLink, // ✅ INCLUDED
+        zoomMeetingId: session.zoomMeetingId, // ✅ INCLUDED
+        zoomPassword: session.zoomPassword, // ✅ INCLUDED
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      },
       zoomCreated: !!zoomData.meeting_id,
     });
   } catch (error) {
-    console.error("Confirm session error:", error);
+    console.error("❌ Confirm session error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
+/**
+ * Reject session request
+ */
 export const rejectSession = async (req, res) => {
   const { sessionId } = req.params;
   const { reason } = req.body;
@@ -334,8 +430,8 @@ export const rejectSession = async (req, res) => {
 
   try {
     const session = await Session.findById(sessionId)
-      .populate("mentee", "email profile.fullName")
-      .populate("mentor", "email profile.fullName");
+      .populate("mentee", "email profile.fullName fullName")
+      .populate("mentor", "email profile.fullName fullName");
 
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
@@ -359,9 +455,9 @@ export const rejectSession = async (req, res) => {
       subject: "Session Request Update",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h3 style="color: #DC2626;">Session Request Status Update</h3>
+          <h3 style="color: #DC2626;">❌ Session Request Status Update</h3>
           <p>Unfortunately, your session request with <strong>${
-            session.mentor.profile.fullName
+            session.mentor.profile?.fullName || session.mentor.fullName
           }</strong> could not be confirmed.</p>
           
           <div style="background: #FEE2E2; padding: 15px; border-radius: 8px; border-left: 4px solid #DC2626; margin: 20px 0;">
@@ -384,22 +480,29 @@ export const rejectSession = async (req, res) => {
 
     res.json({
       message: "Session rejected",
-      session,
+      session: {
+        ...session.toObject(),
+        _id: session._id,
+        id: session._id,
+      },
     });
   } catch (error) {
+    console.error("❌ Reject session error:", error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Cancel session (delete Zoom meeting if exists)
+/**
+ * Cancel session (delete Zoom meeting if exists)
+ */
 export const cancelSession = async (req, res) => {
   const { sessionId } = req.params;
   const userId = req.user.id;
 
   try {
     const session = await Session.findById(sessionId)
-      .populate("mentee", "email profile.fullName")
-      .populate("mentor", "email profile.fullName");
+      .populate("mentee", "email profile.fullName fullName")
+      .populate("mentor", "email profile.fullName fullName");
 
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
@@ -413,9 +516,9 @@ export const cancelSession = async (req, res) => {
     }
 
     if (session.status === "completed") {
-      return res
-        .status(400)
-        .json({ message: "Cannot cancel completed session" });
+      return res.status(400).json({
+        message: "Cannot cancel completed session",
+      });
     }
 
     // Delete Zoom meeting if it exists
@@ -437,16 +540,25 @@ export const cancelSession = async (req, res) => {
       to: otherParty.email,
       subject: "Session Cancelled",
       html: `
-        <p>The session scheduled for ${session.startTime.toLocaleString()} has been cancelled.</p>
-        <p><strong>Topic:</strong> ${session.topic}</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h3 style="color: #DC2626;">Session Cancelled</h3>
+          <p>The session scheduled for <strong>${session.startTime.toLocaleString()}</strong> has been cancelled.</p>
+          <p><strong>Topic:</strong> ${session.topic}</p>
+          <p>If you have any questions, please contact the mentor or support team.</p>
+        </div>
       `,
     });
 
     res.json({
       message: "Session cancelled successfully",
-      session,
+      session: {
+        ...session.toObject(),
+        _id: session._id,
+        id: session._id,
+      },
     });
   } catch (error) {
+    console.error("❌ Cancel session error:", error);
     res.status(500).json({ message: error.message });
   }
 };

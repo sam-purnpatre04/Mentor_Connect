@@ -6,10 +6,11 @@ const transformBooking = (booking) => {
   return {
     ...booking,
     _id: booking._id || booking.id,
+    id: booking._id || booking.id,
     mentor: booking.mentor
       ? {
-          id: booking.mentor._id,
-          _id: booking.mentor._id,
+          id: booking.mentor._id || booking.mentor.id,
+          _id: booking.mentor._id || booking.mentor.id,
           fullName: booking.mentor.profile?.fullName || booking.mentor.fullName,
           email: booking.mentor.email,
           university:
@@ -19,12 +20,16 @@ const transformBooking = (booking) => {
       : null,
     mentee: booking.mentee
       ? {
-          id: booking.mentee._id,
-          _id: booking.mentee._id,
+          id: booking.mentee._id || booking.mentee.id,
+          _id: booking.mentee._id || booking.mentee.id,
           fullName: booking.mentee.profile?.fullName || booking.mentee.fullName,
           email: booking.mentee.email,
         }
       : null,
+    // ✅ ENSURE ZOOM FIELDS ARE INCLUDED
+    zoomLink: booking.zoomLink || null,
+    zoomMeetingId: booking.zoomMeetingId || null,
+    zoomPassword: booking.zoomPassword || null,
   };
 };
 
@@ -36,7 +41,9 @@ export const createBooking = async (bookingData) => {
 export const getMyBookings = async () => {
   const response = await apiClient.get("/bookings/my");
   const bookingsArray = response.data.bookings || response.data;
-  return bookingsArray.map(transformBooking);
+
+  // ✅ Map and transform all bookings
+  return bookingsArray.map((booking) => transformBooking(booking));
 };
 
 export const getBookingById = async (bookingId) => {
@@ -54,9 +61,10 @@ export const cancelBooking = async (bookingId) => {
   return response.data;
 };
 
-// NEW: Confirm session (mentor)
+// ✅ FIXED: Confirm session returns full session with zoom details
 export const confirmSession = async (sessionId) => {
   const response = await apiClient.post(`/bookings/${sessionId}/confirm`);
+  console.log("✅ Confirm response:", response.data);
   return transformBooking(response.data.session);
 };
 

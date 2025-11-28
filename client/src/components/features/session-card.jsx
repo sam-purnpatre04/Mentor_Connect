@@ -12,10 +12,17 @@ import {
   XCircle,
   AlertCircle,
   ExternalLink,
+  Loader,
 } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/utils/date";
 
-export const SessionCard = ({ session, userRole, onComplete, onReview }) => {
+export const SessionCard = ({
+  session,
+  userRole,
+  onConfirm,
+  onJoinSession,
+  isConfirming,
+}) => {
   const getStatusConfig = (status) => {
     switch (status) {
       case "pending":
@@ -59,6 +66,11 @@ export const SessionCard = ({ session, userRole, onComplete, onReview }) => {
 
   const otherParty = userRole === "mentor" ? session.mentee : session.mentor;
 
+  // ✅ Debug log
+  if (session.status === "confirmed" && !session.zoomLink) {
+    console.warn("⚠️ Session confirmed but no zoom link:", session);
+  }
+
   return (
     <Card className="hover:shadow-md transition-shadow">
       <CardContent className="p-4">
@@ -97,43 +109,56 @@ export const SessionCard = ({ session, userRole, onComplete, onReview }) => {
           </div>
         </div>
 
-        {/* Zoom Link - Show only when confirmed */}
-        {canJoin && (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <Video size={16} className="text-green-600" />
-              <span className="text-sm font-medium text-green-900">
-                Meeting Link Ready
-              </span>
-            </div>
-            <a
-              href={session.zoomLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-green-700 hover:text-green-800 underline flex items-center gap-1"
-            >
-              Join Zoom Meeting
-              <ExternalLink size={14} />
-            </a>
-            {session.zoomMeetingId && (
-              <div className="mt-2 text-xs text-gray-600 space-y-1">
-                <p>
-                  Meeting ID:{" "}
-                  <span className="font-mono font-semibold">
-                    {session.zoomMeetingId}
+        {/* ✅ ZOOM LINK - Show when confirmed */}
+        {session.status === "confirmed" && (
+          <>
+            {session.zoomLink ? (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <Video size={16} className="text-green-600" />
+                  <span className="text-sm font-medium text-green-900">
+                    Meeting Link Ready
                   </span>
-                </p>
-                {session.zoomPassword && (
-                  <p>
-                    Password:{" "}
-                    <span className="font-mono font-semibold">
-                      {session.zoomPassword}
-                    </span>
-                  </p>
+                </div>
+                <a
+                  href={session.zoomLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-green-700 hover:text-green-800 underline flex items-center gap-1"
+                >
+                  Join Zoom Meeting
+                  <ExternalLink size={14} />
+                </a>
+                {session.zoomMeetingId && (
+                  <div className="mt-2 text-xs text-gray-600 space-y-1">
+                    <p>
+                      Meeting ID:{" "}
+                      <span className="font-mono font-semibold">
+                        {session.zoomMeetingId}
+                      </span>
+                    </p>
+                    {session.zoomPassword && (
+                      <p>
+                        Password:{" "}
+                        <span className="font-mono font-semibold">
+                          {session.zoomPassword}
+                        </span>
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
+            ) : (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={16} className="text-yellow-600" />
+                  <p className="text-sm text-yellow-800">
+                    Zoom link generating...
+                  </p>
+                </div>
+              </div>
             )}
-          </div>
+          </>
         )}
 
         {/* Pending Message */}
@@ -159,39 +184,37 @@ export const SessionCard = ({ session, userRole, onComplete, onReview }) => {
 
         {/* Action Buttons */}
         <div className="flex gap-2">
+          {/* Mentor: Confirm pending session */}
+          {session.status === "pending" && userRole === "mentor" && (
+            <Button
+              onClick={() => onConfirm?.(session._id || session.id)}
+              disabled={isConfirming}
+              className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600"
+            >
+              {isConfirming ? (
+                <>
+                  <Loader className="mr-2 size-4 animate-spin" />
+                  Confirming...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="mr-2" size={16} />
+                  Confirm Session
+                </>
+              )}
+            </Button>
+          )}
+
+          {/* Join Meeting Button */}
           {canJoin && (
             <Button
-              onClick={() => window.open(session.zoomLink, "_blank")}
+              onClick={() => onJoinSession?.(session.zoomLink)}
               className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600"
             >
               <Video className="mr-2" size={16} />
               Join Meeting
             </Button>
           )}
-
-          {session.status === "confirmed" && isPast && onComplete && (
-            <Button
-              onClick={() => onComplete(session._id)}
-              variant="outline"
-              className="flex-1"
-            >
-              <CheckCircle className="mr-2" size={16} />
-              Mark Complete
-            </Button>
-          )}
-
-          {session.status === "completed" &&
-            !session.reviewedByMentee &&
-            userRole === "mentee" &&
-            onReview && (
-              <Button
-                onClick={() => onReview(session)}
-                variant="outline"
-                className="flex-1"
-              >
-                Leave Review
-              </Button>
-            )}
         </div>
       </CardContent>
     </Card>

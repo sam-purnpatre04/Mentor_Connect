@@ -2,41 +2,92 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { MentorLayout } from "@/components/layout/mentor-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader } from "lucide-react";
-import { getMyBookings } from "@/lib/api/bookings";
+import { getMyBookings, confirmSession } from "@/lib/api/bookings";
 import { SessionCard } from "@/components/features/session-card";
 import toast from "react-hot-toast";
 
-export default function SessionsPage() {
+export default function MentorSessionsPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
+  const [confirming, setConfirming] = useState(null);
 
   useEffect(() => {
     loadSessions();
+    // ✅ Auto-refresh every 5 seconds
+    const interval = setInterval(loadSessions, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadSessions = async () => {
     try {
       const data = await getMyBookings();
+      console.log("✅ Sessions loaded:", data);
       setSessions(data);
     } catch (error) {
+      console.error("❌ Failed to load sessions:", error);
       toast.error("Failed to load sessions");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleConfirmSession = async (sessionId) => {
+    setConfirming(sessionId);
+    try {
+      console.log("🔄 Confirming session:", sessionId);
+      const updatedSession = await confirmSession(sessionId);
+
+      console.log("✅ Session confirmed:", updatedSession);
+
+      // ✅ Update local state immediately
+      setSessions((prevSessions) =>
+        prevSessions.map((s) =>
+          s._id === sessionId || s.id === sessionId
+            ? {
+                ...s,
+                ...updatedSession,
+                status: "confirmed",
+                zoomLink: updatedSession.zoomLink,
+                zoomMeetingId: updatedSession.zoomMeetingId,
+                zoomPassword: updatedSession.zoomPassword,
+              }
+            : s
+        )
+      );
+
+      toast.success("Session confirmed! Zoom link sent to mentee.");
+
+      // ✅ Refresh from server after 2 seconds
+      setTimeout(loadSessions, 2000);
+    } catch (error) {
+      console.error("❌ Error confirming session:", error);
+      toast.error("Failed to confirm session");
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  const handleJoinSession = (zoomLink) => {
+    if (zoomLink) {
+      window.open(zoomLink, "_blank");
+      toast.success("Opening Zoom meeting...");
+    } else {
+      toast.error("Zoom link not available");
+    }
+  };
+
   if (loading) {
     return (
-      <DashboardLayout>
+      <MentorLayout>
         <div className="flex items-center justify-center min-h-[60vh]">
           <Loader className="animate-spin h-12 w-12 text-purple-600" />
         </div>
-      </DashboardLayout>
+      </MentorLayout>
     );
   }
 
@@ -46,13 +97,38 @@ export default function SessionsPage() {
   );
   const pending = sessions.filter((s) => s.status === "pending");
   const completed = sessions.filter((s) => s.status === "completed");
-  const rejected = sessions.filter((s) => s.status === "rejected");
+  const rejected = sessions.filter(
+    (s) => s.status === "rejected" || s.status === "cancelled"
+  );
+
+  const renderSessionsList = (sessionList, emptyMessage) => {
+    if (sessionList.length === 0) {
+      return <p className="text-center text-gray-500 py-8">{emptyMessage}</p>;
+    }
+
+    return (
+      <div className="space-y-4">
+        {sessionList.map((session) => (
+          <SessionCard
+            key={session._id || session.id}
+            session={session}
+            userRole="mentor"
+            onConfirm={
+              session.status === "pending" ? handleConfirmSession : undefined
+            }
+            onJoinSession={handleJoinSession}
+            isConfirming={confirming === (session._id || session.id)}
+          />
+        ))}
+      </div>
+    );
+  };
 
   return (
-    <DashboardLayout>
+    <MentorLayout>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">My Sessions</h1>
-        <p className="text-gray-600">Manage all your mentorship sessions</p>
+        <p className="text-gray-600">Manage all your mentoring sessions</p>
       </div>
 
       <Tabs defaultValue="upcoming" className="space-y-6">
@@ -75,21 +151,7 @@ export default function SessionsPage() {
               <CardTitle>Upcoming Sessions</CardTitle>
             </CardHeader>
             <CardContent>
-              {upcoming.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">
-                  No upcoming sessions
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {upcoming.map((session) => (
-                    <SessionCard
-                      key={session._id}
-                      session={session}
-                      userRole="mentee"
-                    />
-                  ))}
-                </div>
-              )}
+              {renderSessionsList(upcoming, "No upcoming sessions scheduled.")}
             </CardContent>
           </Card>
         </TabsContent>
@@ -100,21 +162,7 @@ export default function SessionsPage() {
               <CardTitle>Pending Approval</CardTitle>
             </CardHeader>
             <CardContent>
-              {pending.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">
-                  No pending sessions
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {pending.map((session) => (
-                    <SessionCard
-                      key={session._id}
-                      session={session}
-                      userRole="mentee"
-                    />
-                  ))}
-                </div>
-              )}
+              {renderSessionsList(pending, "No pending session requests.")}
             </CardContent>
           </Card>
         </TabsContent>
@@ -125,21 +173,7 @@ export default function SessionsPage() {
               <CardTitle>Completed Sessions</CardTitle>
             </CardHeader>
             <CardContent>
-              {completed.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">
-                  No completed sessions
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {completed.map((session) => (
-                    <SessionCard
-                      key={session._id}
-                      session={session}
-                      userRole="mentee"
-                    />
-                  ))}
-                </div>
-              )}
+              {renderSessionsList(completed, "No completed sessions yet.")}
             </CardContent>
           </Card>
         </TabsContent>
@@ -147,28 +181,17 @@ export default function SessionsPage() {
         <TabsContent value="rejected">
           <Card>
             <CardHeader>
-              <CardTitle>Rejected Requests</CardTitle>
+              <CardTitle>Rejected/Cancelled</CardTitle>
             </CardHeader>
             <CardContent>
-              {rejected.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">
-                  No rejected sessions
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {rejected.map((session) => (
-                    <SessionCard
-                      key={session._id}
-                      session={session}
-                      userRole="mentee"
-                    />
-                  ))}
-                </div>
+              {renderSessionsList(
+                rejected,
+                "No rejected or cancelled sessions."
               )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-    </DashboardLayout>
+    </MentorLayout>
   );
 }
