@@ -40,18 +40,6 @@ Mentor Connect is a web application designed to connect students with experience
 
 ---
 
-## Project Structure
-
-```
-Mentor-Connect
-│
-├── frontend
-├── backend
-├── database
-├── assets
-└── README.md
-```
-
 ---
 
 ## Workflow
@@ -100,9 +88,3 @@ This project helped in understanding:
 - Responsive Web Design
 
 ---
-
-## Author
-
-**Samruddhi Purnpatre**
-
-GitHub: https://github.com/sam-purnpatre04
