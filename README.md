@@ -35,6 +35,9 @@ Mentor Connect is a full-stack web application that connects students with exper
 ### Database
 - MongoDB
 
+### Encryption
+- b-crypt
+
 ### Development Tools
 - Git
 - GitHub
